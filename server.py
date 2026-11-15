@@ -33,6 +33,12 @@ MAX_BODY = 12 * 1024 * 1024
 SESSION_AGE = 30 * 86400
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
 ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{8,80}$")
+USERNAME_PATTERN = re.compile(r"^[a-zA-Z0-9_.-]{3,40}$")
+SERVICE_FIELDS = {
+    "trefle": ("token",), "plantnet": ("token",),
+    "plantbook": ("clientId", "clientSecret"),
+    "homeassistant": ("url", "token"),
+}
 
 
 @contextmanager
@@ -82,10 +88,21 @@ def initialize_database():
                 user_id TEXT PRIMARY KEY, data TEXT NOT NULL,
                 FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
             );
+            CREATE TABLE IF NOT EXISTS service_credentials (
+                user_id TEXT NOT NULL, service TEXT NOT NULL, data TEXT NOT NULL,
+                PRIMARY KEY(user_id, service),
+                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
             CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires_at);
             CREATE INDEX IF NOT EXISTS plants_user ON plants(user_id);
             CREATE INDEX IF NOT EXISTS rooms_user ON rooms(user_id);
         """)
+        columns = {row["name"] for row in db.execute("PRAGMA table_info(users)")}
+        if "username" not in columns:
+            db.execute("ALTER TABLE users ADD COLUMN username TEXT")
+            # Existing email accounts keep their old login until renamed in account settings.
+            db.execute("UPDATE users SET username=email WHERE username IS NULL")
+        db.execute("CREATE UNIQUE INDEX IF NOT EXISTS users_username ON users(username COLLATE NOCASE)")
 
 
 def password_hash(password: str, salt: bytes) -> bytes:
@@ -239,8 +256,11 @@ class Handler(BaseHTTPRequestHandler):
                 user = self.user_id()
             except ApiError:
                 user = None
+            with database() as db:
+                account = db.execute("SELECT username FROM users WHERE id=?", (user,)).fetchone() if user else None
             return self.json(200, {"authenticated": bool(user), "firstAccount": users == 0,
-                                   "registrationOpen": users == 0 or bool(INVITE_CODE)})
+                                   "registrationOpen": users == 0 or bool(INVITE_CODE),
+                                   "username": account["username"] if account else None})
         if path == "/api/auth/register" and method == "POST":
             return self.register()
         if path == "/api/auth/login" and method == "POST":
@@ -256,6 +276,16 @@ class Handler(BaseHTTPRequestHandler):
             return self.json(200, {"ok": True}, cookie=self.session_cookie("", 0))
 
         user = self.user_id()
+        if path == "/api/account" and method == "PUT":
+            username = str(self.json_body().get("username", "")).strip()
+            if not USERNAME_PATTERN.fullmatch(username):
+                raise ApiError(400, "Benutzername: drei bis vierzig Buchstaben, Zahlen, Punkte, Binde- oder Unterstriche.")
+            try:
+                with database() as db:
+                    db.execute("UPDATE users SET username=? WHERE id=?", (username, user))
+            except sqlite3.IntegrityError as error:
+                raise ApiError(409, "Dieser Benutzername ist schon vergeben.") from error
+            return self.json(200, {"username": username})
         if path == "/api/state" and method == "GET":
             with database() as db:
                 plants = [json.loads(row[0]) for row in db.execute("SELECT data FROM plants WHERE user_id=?", (user,))]
@@ -327,20 +357,20 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/import" and method == "POST":
             return self.import_data(user)
         if path.startswith("/api/services/"):
-            return self.services(method, path, query)
+            return self.services(user, method, path, query)
         if path == "/api/homeassistant/status" and method == "GET":
-            return self.json(200, {"connected": bool(os.environ.get("HOME_ASSISTANT_URL") and
-                                                     os.environ.get("HOME_ASSISTANT_TOKEN"))})
+            credentials = self.credentials(user, "homeassistant")
+            return self.json(200, {"connected": bool(credentials.get("url") and credentials.get("token"))})
         if path == "/api/homeassistant/readings" and method == "GET":
-            return self.home_assistant(query)
+            return self.home_assistant(user, query)
         raise ApiError(404, "Nicht gefunden.")
 
     def register(self):
         value = self.json_body()
-        email = str(value.get("email", "")).strip().lower()
+        username = str(value.get("username", "")).strip()
         password = str(value.get("password", ""))
-        if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email) or len(email) > 254:
-            raise ApiError(400, "Bitte eine gültige E-Mail-Adresse eingeben.")
+        if not USERNAME_PATTERN.fullmatch(username):
+            raise ApiError(400, "Benutzername: drei bis vierzig Buchstaben, Zahlen, Punkte, Binde- oder Unterstriche.")
         if len(password) < 10 or len(password) > 200:
             raise ApiError(400, "Das Passwort braucht mindestens zehn Zeichen.")
         user_id = secrets.token_urlsafe(18)
@@ -350,20 +380,21 @@ class Handler(BaseHTTPRequestHandler):
             if users and (not INVITE_CODE or not hmac.compare_digest(str(value.get("invite", "")), INVITE_CODE)):
                 raise ApiError(403, "Für weitere Konten brauchst du den Einladungscode.")
             try:
-                db.execute("INSERT INTO users VALUES(?,?,?,?,?)",
-                           (user_id, email, salt, password_hash(password, salt), int(time.time())))
+                db.execute("INSERT INTO users(id,email,salt,password_hash,created_at,username) VALUES(?,?,?,?,?,?)",
+                           (user_id, user_id + "@local.invalid", salt, password_hash(password, salt), int(time.time()), username))
             except sqlite3.IntegrityError as error:
-                raise ApiError(409, "Für diese E-Mail-Adresse gibt es bereits ein Konto.") from error
+                raise ApiError(409, "Dieser Benutzername ist schon vergeben.") from error
         return self.start_session(user_id)
 
     def login(self):
         value = self.json_body()
-        email = str(value.get("email", "")).strip().lower()
+        username = str(value.get("username", "")).strip()
         password = str(value.get("password", ""))
         with database() as db:
-            row = db.execute("SELECT id,salt,password_hash FROM users WHERE email=?", (email,)).fetchone()
+            row = db.execute("SELECT id,salt,password_hash FROM users WHERE username=? COLLATE NOCASE OR email=? COLLATE NOCASE",
+                             (username, username)).fetchone()
         if not row or not hmac.compare_digest(password_hash(password, row["salt"]), row["password_hash"]):
-            raise ApiError(401, "E-Mail-Adresse oder Passwort stimmt nicht.")
+            raise ApiError(401, "Benutzername oder Passwort stimmt nicht.")
         return self.start_session(row["id"])
 
     def start_session(self, user_id: str):
@@ -416,11 +447,42 @@ class Handler(BaseHTTPRequestHandler):
                        (user, json.dumps(settings, ensure_ascii=False)))
         return self.json(200, {"ok": True})
 
-    def services(self, method: str, path: str, query: dict):
-        trefle = os.environ.get("TREFLE_TOKEN", "")
-        plantnet = os.environ.get("PLANTNET_TOKEN", "")
-        plantbook_id = os.environ.get("PLANTBOOK_CLIENT_ID", "")
-        plantbook_secret = os.environ.get("PLANTBOOK_CLIENT_SECRET", "")
+    def credentials(self, user: str, service: str) -> dict:
+        with database() as db:
+            row = db.execute("SELECT data FROM service_credentials WHERE user_id=? AND service=?",
+                             (user, service)).fetchone()
+        return json.loads(row["data"]) if row else {}
+
+    def services(self, user: str, method: str, path: str, query: dict):
+        prefix = "/api/services/credentials/"
+        if path.startswith(prefix) and method in ("PUT", "DELETE"):
+            service = path[len(prefix):]
+            fields = SERVICE_FIELDS.get(service)
+            if not fields:
+                raise ApiError(404, "Unbekannter Dienst.")
+            if method == "DELETE":
+                with database() as db:
+                    db.execute("DELETE FROM service_credentials WHERE user_id=? AND service=?", (user, service))
+                return self.json(200, {"ok": True})
+            supplied = self.json_body()
+            previous = self.credentials(user, service)
+            values = {key: str(supplied.get(key, "")).strip() or previous.get(key, "") for key in fields}
+            if any(not value or len(value) > 2048 for value in values.values()):
+                raise ApiError(400, "Bitte alle benötigten Zugangsdaten eingeben.")
+            if service == "homeassistant":
+                parsed = urllib.parse.urlsplit(values["url"])
+                if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password:
+                    raise ApiError(400, "Bitte eine gültige Home-Assistant-Adresse eingeben.")
+                values["url"] = values["url"].rstrip("/")
+            with database() as db:
+                db.execute("INSERT INTO service_credentials(user_id,service,data) VALUES(?,?,?) "
+                           "ON CONFLICT(user_id,service) DO UPDATE SET data=excluded.data",
+                           (user, service, json.dumps(values)))
+            return self.json(200, {"ok": True})
+        trefle = self.credentials(user, "trefle").get("token", "")
+        plantnet = self.credentials(user, "plantnet").get("token", "")
+        plantbook = self.credentials(user, "plantbook")
+        plantbook_id, plantbook_secret = plantbook.get("clientId", ""), plantbook.get("clientSecret", "")
         if path == "/api/services/status" and method == "GET":
             return self.json(200, {"trefle": bool(trefle), "plantnet": bool(plantnet),
                                    "plantbook": bool(plantbook_id and plantbook_secret)})
@@ -487,9 +549,10 @@ class Handler(BaseHTTPRequestHandler):
                                     "score": item.get("score", 0)} for item in response.get("results", [])[:5]])
         raise ApiError(404, "Nicht gefunden.")
 
-    def home_assistant(self, query: dict):
-        base = os.environ.get("HOME_ASSISTANT_URL", "").rstrip("/")
-        token = os.environ.get("HOME_ASSISTANT_TOKEN", "")
+    def home_assistant(self, user: str, query: dict):
+        credentials = self.credentials(user, "homeassistant")
+        base = credentials.get("url", "").rstrip("/")
+        token = credentials.get("token", "")
         if not base or not token:
             raise ApiError(503, "Home Assistant ist noch nicht verbunden.")
         if not base.startswith(("https://", "http://")):

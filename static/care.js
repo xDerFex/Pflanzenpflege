@@ -3,13 +3,21 @@ export const taskKinds = {'Düngen':'Gedüngt','Besprühen':'Besprüht','Blätte
 export const substrates = ['Blumenerde','Lockerer Aroid-Mix','Mineralisch','Anderes Substrat'];
 export const directions = ['Norden','Nordosten','Osten','Südosten','Süden','Südwesten','Westen','Nordwesten'];
 const localDay = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+export function uid(){
+  const bytes=new Uint8Array(16);
+  if(globalThis.crypto?.getRandomValues)globalThis.crypto.getRandomValues(bytes);
+  else for(let i=0;i<bytes.length;i++)bytes[i]=Math.floor(Math.random()*256);
+  bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128;
+  const hex=[...bytes].map(x=>x.toString(16).padStart(2,'0')).join('');
+  return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
+}
 export const today = () => localDay(new Date());
 export const dateOnly = value => value ? String(value).slice(0,10) : '';
 export const addDays = (value, days) => {const d=new Date(dateOnly(value)+'T12:00:00'); d.setDate(d.getDate()+Number(days)); return localDay(d)};
 export const due = value => !!value && dateOnly(value)<=today();
 export const formatDate = value => value ? new Intl.DateTimeFormat('de-DE',{day:'numeric',month:'short',year:'numeric'}).format(new Date(dateOnly(value)+'T12:00:00')) : '–';
 export const name = plant => plant.nickname?.trim() || plant.species;
-export const event = (kind, extra={}) => ({id:crypto.randomUUID(),date:new Date().toISOString(),kind,note:'',...extra});
+export const event = (kind, extra={}) => ({id:uid(),date:new Date().toISOString(),kind,note:'',...extra});
 export function suggestedDays(task,species='') {let s=species.toLowerCase(); return {'Düngen':s.includes('kakt')||s.includes('aloe')?42:28,'Besprühen':3,'Blätter reinigen':28,'Rückschnitt prüfen':56,'Fortschritt festhalten':30,'Umtopfen':365}[task]||30}
 export function starterPlans(species){return ['Düngen','Fortschritt festhalten'].map(task=>({task,days:suggestedDays(task,species),next:addDays(today(),suggestedDays(task,species))}))}
 export function interval(p,day=today()){
@@ -26,4 +34,4 @@ function recordCycle(p,when){if(!p.lastWatered)return;const days=Math.round((new
 export function water(p,observedDry=true){const now=new Date().toISOString();if(observedDry){const isDue=due(p.nextCheck);const checkedWet=(p.events||[]).some(e=>e.kind==='Noch feucht'&&p.lastWatered&&e.date>=p.lastWatered);if(!isDue||dateOnly(p.nextCheck)===today()||checkedWet)recordCycle(p,now);if(!isDue)(p.events||=[]).push(event('Schon trocken'))}p.lastWatered=now;p.sensorSnoozeUntil=null;(p.events||=[]).push(event('Gegossen'));p.nextCheck=addDays(today(),interval(p));return p}
 export function postponeCheck(p,days,wet){if(wet)(p.events||=[]).push(event('Noch feucht'));p.nextCheck=addDays(today(),days);p.sensorSnoozeUntil=p.nextCheck;return p}
 export function finishTask(p,task){(p.events||=[]).push(event(taskKinds[task]));const plan=(p.taskPlans||[]).find(x=>x.task===task);if(plan){let days=plan.days;if(task==='Düngen'&&[11,12,1,2].includes(new Date().getMonth()+1)&&!(p.growLight&&(+p.lightHours||0)>=8))days=Math.max(30,days*2);plan.next=addDays(today(),days)}return p}
-export function newPlant(){return {id:crypto.randomUUID(),species:'',nickname:'',roomID:'',windowID:'',windowDirection:'',windowDistance:null,growLight:false,lightHours:null,ppfd:null,dli:null,potDiameter:12,substrate:'Blumenerde',nearHeater:false,lastWatered:null,nextCheck:addDays(today(),5),photoName:null,events:[],winterCycles:[],summerCycles:[],taskPlans:[],sensor:null,milestoneDate:null,scientificName:null,careNotes:null,referenceImageURL:null,useReferenceImage:false,extraNotification:false}}
+export function newPlant(){return {id:uid(),species:'',nickname:'',roomID:'',windowID:'',windowDirection:'',windowDistance:null,growLight:false,lightHours:null,ppfd:null,dli:null,potDiameter:12,substrate:'Blumenerde',nearHeater:false,lastWatered:null,nextCheck:addDays(today(),5),photoName:null,events:[],winterCycles:[],summerCycles:[],taskPlans:[],sensor:null,milestoneDate:null,scientificName:null,careNotes:null,referenceImageURL:null,useReferenceImage:false,extraNotification:false}}

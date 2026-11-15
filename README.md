@@ -1,37 +1,51 @@
 # Pflanzenpflege Web
 
-Die Web-App läuft auf deinem eigenen Docker-Server. Docker baut das Image beim ersten Start automatisch aus dem mitgelieferten `Dockerfile`. Du brauchst dafür kein veröffentlichtes Image, keinen Apple-Entwickleraccount und für den ersten Test im Heimnetz kein HTTPS.
+Eine selbst gehostete Web-App für Zimmerpflanzen: Pflanzen und Räume verwalten, Pflegeaufgaben planen, Fortschritt mit Fotos festhalten und Pflanzendienste optional verbinden. Die Oberfläche ist für Smartphone und Desktop ausgelegt.
 
-## Einfacher Start mit Docker
+## Schnellstart mit Docker Compose
 
-1. Kopiere `Pflanzenpflege-Web.tar.gz` auf deinen Docker-Server und entpacke es dort. Falls du den Ordner bereits übertragen hast, kannst du diesen Schritt überspringen.
-2. Öffne auf dem Server ein Terminal im entpackten Ordner `Pflanzenpflege-Web`.
-3. Starte die App:
+Das öffentliche Image ist für AMD64 und ARM64 verfügbar. Eine Compose-Datei für den Image-Download liegt in [`compose.github.yaml`](compose.github.yaml).
 
-   ```sh
-   docker compose up --build -d
-   ```
+```sh
+docker compose -f compose.github.yaml up -d
+```
 
-4. Öffne auf deinem Computer im selben Heimnetz `http://SERVER-IP:8000`. Ersetze `SERVER-IP` durch die lokale Adresse deines Servers. Beim ersten Besuch legst du dein Konto an.
+Alternativ kann das Image aus dem Quellcode gebaut werden:
 
-Mehr Konfiguration ist für den ersten Test nicht erforderlich. Die Daten liegen in einem Docker-Volume und bleiben bei normalen Container-Updates erhalten. Zum Nachsehen bei einem Startproblem: `docker compose logs --tail=100 pflanzenpflege`.
+```sh
+docker compose up --build -d
+```
 
-**Heimnetz-Test:** Port 8000 wird auf dem Docker-Host freigegeben. Leite ihn nicht im Router ins öffentliche Internet weiter. Falls eine Firewall auf dem Server läuft, muss sie Zugriffe aus deinem Heimnetz auf Port 8000 erlauben. Läuft Docker in einer VM oder einem Container, verwende deren Netzwerkadresse.
+Die App ist anschließend im lokalen Netzwerk unter `http://<SERVER-IP>:8000` erreichbar. Beim ersten Aufruf wird ein Konto mit Benutzername und Passwort angelegt. Für den ersten Test im Heimnetz ist kein HTTPS erforderlich. Port 8000 sollte nicht per Router ins öffentliche Internet weitergeleitet werden.
 
-## Später: iPhone und weitere Geräte
+Docker-Oberflächen mit Compose-Unterstützung können den Inhalt von `compose.github.yaml` als Projekt importieren. Ein benanntes Volume unter `/data` enthält Konten, Pflanzen, Fotos und persönliche Dienst-Zugangsdaten. Bei Updates muss das Volume erhalten bleiben.
 
-Die Seite lässt sich über die Serveradresse auch im iPhone-Browser öffnen. Für die volle Installation als Web-App mit Service Worker und bestimmte Browserfunktionen brauchst du HTTPS. Das kannst du später ergänzen, etwa mit Tailscale Serve auf dem Docker-Host oder einem Reverse Proxy. Die App selbst kann dabei intern auf HTTP bleiben.
+## Weitere Konten und Einstellungen
 
-Für weitere Konten setze später `INVITE_CODE` in einer `.env`-Datei auf dem Server. Ohne Einladungscode kann nur das erste Konto angelegt werden. Die optionale `.env.example` zeigt auch die Felder für Trefle, Pl@ntNet, Open Plantbook und Home Assistant. Die Zugangsdaten gehören auf den Server, nicht in die App oder ein öffentliches GitHub-Repository.
+Standardmäßig kann nur das erste Konto angelegt werden. Für weitere Konten kann ein privater `INVITE_CODE` als Umgebungsvariable gesetzt werden, zum Beispiel über eine `.env`-Datei oder die Docker-Oberfläche. Neue Benutzer geben diesen Code bei der Registrierung ein. Jedes Konto hat eigene Pflanzen, Fotos und Zugangsdaten für Pflanzendienste und Smart Home.
 
-## Umfang und Grenzen
+Trefle, Open Plantbook, Pl@ntNet und Home Assistant können nach der Anmeldung in **Einstellungen → Verbindungen** pro Konto eingerichtet werden. Die Schlüssel werden serverseitig in der Datenbank gespeichert und nicht an andere Konten ausgegeben. Bei selbst gehosteten Installationen sollte der Zugriff auf das Docker-Volume entsprechend geschützt und gesichert werden.
 
-Pflanzen, Räume und Fenster, Aufgaben, Pflegepläne, Fortschrittsfotos, Verlauf, Jahresüberblick, getrennte Konten, Sicherung und optional verbundene Pflanzendienste sind enthalten. Deine Daten aus der bisherigen iPhone-App werden nicht automatisch übernommen. Die tägliche Erinnerung funktioniert nur bei geöffneter Web-App; Push im Hintergrund ist noch nicht implementiert. Die Jahresgrafik ist eine Schätzung anhand deiner Intervalle.
+Für Zugriff außerhalb des Heimnetzes empfiehlt sich HTTPS über einen Reverse Proxy oder einen privaten Zugang wie Tailscale Serve. Mit `PUBLIC_ORIGIN` kann die öffentliche HTTPS-Adresse angegeben werden. Eine installierbare Web-App mit Service Worker benötigt einen sicheren Browser-Kontext.
 
-Optional ohne Docker auf dem Mac testen: im Projektordner `python3 server.py` ausführen und `http://127.0.0.1:8000` öffnen.
+## Updates und Sicherungen
 
-## GitHub und spätere Updates
+Bei Änderungen am Hauptzweig prüft GitHub Actions den Python-Code und veröffentlicht ein neues Image. Für ein Update das aktuelle Image laden und das Compose-Projekt mit demselben Datenvolume neu bereitstellen. **Das Volume nicht löschen.**
 
-Der Quellcode liegt im öffentlichen Repository `xDerFex/Pflanzenpflege`. Der vorbereitete GitHub-Ablauf prüft den Python-Code und baut bei Änderungen am Hauptzweig automatisch ein Docker-Image für AMD64 und ARM64. Das Image wird erst verfügbar, nachdem der Code hochgeladen und der erste GitHub-Ablauf erfolgreich beendet wurde. GitHub Container Registry legt neue Pakete zunächst privat an; damit der Server ohne GitHub-Anmeldung laden kann, muss das Paket danach einmalig öffentlich gestellt werden.
+In der App kann jedes Konto unter **Einstellungen → Deine Daten** seine Pflanzen, Räume, Fotos und Darstellungseinstellungen als JSON-Datei exportieren und wieder einlesen. Dienst-Zugangsdaten sind aus Sicherheitsgründen nicht Teil dieser Sicherung.
 
-Für diese spätere Variante liegt `compose.github.yaml` bereit. Auf dem Server kann man damit `docker compose -f compose.github.yaml pull` und anschließend `docker compose -f compose.github.yaml up -d` ausführen. Das Datenvolume bleibt erhalten, solange dasselbe Compose-Projektverzeichnis verwendet und das Volume nicht gelöscht wird.
+## Entwicklung
+
+Die App benötigt zur Laufzeit nur Python 3 und die Standardbibliothek. Lokal starten:
+
+```sh
+python3 server.py
+```
+
+Danach `http://127.0.0.1:8000` öffnen. Tests:
+
+```sh
+python3 -m unittest discover -s tests -v
+```
+
+Die Web-App übernimmt keine Daten automatisch aus einer früheren iOS-App. Hintergrund-Push-Benachrichtigungen sind derzeit nicht enthalten.

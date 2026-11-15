@@ -1,4 +1,4 @@
-const CACHE = 'pflanzenpflege-v2';
+const CACHE = 'pflanzenpflege-v3';
 const FILES = ['/', '/index.html', '/style.css', '/app.js', '/care.js', '/icon.png', '/icon-192.png', '/manifest.webmanifest'];
 
 self.addEventListener('install', event => {
