@@ -1,0 +1,19 @@
+services:
+  pflanzenpflege:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      INVITE_CODE: ${INVITE_CODE:-}
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-}
+      TREFLE_TOKEN: ${TREFLE_TOKEN:-}
+      PLANTNET_TOKEN: ${PLANTNET_TOKEN:-}
+      PLANTBOOK_CLIENT_ID: ${PLANTBOOK_CLIENT_ID:-}
+      PLANTBOOK_CLIENT_SECRET: ${PLANTBOOK_CLIENT_SECRET:-}
+      HOME_ASSISTANT_URL: ${HOME_ASSISTANT_URL:-}
+      HOME_ASSISTANT_TOKEN: ${HOME_ASSISTANT_TOKEN:-}
+    volumes:
+      - pflanzenpflege_data:/data
+volumes:
+  pflanzenpflege_data:
