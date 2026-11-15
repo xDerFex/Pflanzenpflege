@@ -116,6 +116,16 @@ class ServerTest(unittest.TestCase):
         status, result, _ = self.request("PUT", "/api/account", {"username": "gardener"}, first_cookie)
         self.assertEqual((status, result["username"]), (200, "gardener"))
         self.assertEqual(self.request("GET", "/api/auth/status", cookie=first_cookie)[1]["username"], "gardener")
+        status, _, _ = self.request("PUT", "/api/account/password", {
+            "currentPassword": "very-secure-passphrase", "newPassword": "another-secure-passphrase"
+        }, first_cookie)
+        self.assertEqual(status, 200)
+        self.assertEqual(self.request("POST", "/api/auth/login", {
+            "username": "gardener", "password": "another-secure-passphrase"
+        })[0], 200)
+        self.assertEqual(self.request("POST", "/api/auth/login", {
+            "username": "gardener", "password": "very-secure-passphrase"
+        })[0], 401)
 
     def test_origin_rejection(self):
         status, _, _ = self.request("POST", "/api/auth/login", {}, headers={"Origin": "https://wrong.example"})

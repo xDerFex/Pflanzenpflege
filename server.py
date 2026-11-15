@@ -286,6 +286,24 @@ class Handler(BaseHTTPRequestHandler):
             except sqlite3.IntegrityError as error:
                 raise ApiError(409, "Dieser Benutzername ist schon vergeben.") from error
             return self.json(200, {"username": username})
+        if path == "/api/account/password" and method == "PUT":
+            value = self.json_body()
+            old_password = str(value.get("currentPassword", ""))
+            new_password = str(value.get("newPassword", ""))
+            if len(new_password) < 10 or len(new_password) > 200:
+                raise ApiError(400, "Das neue Passwort braucht mindestens zehn Zeichen.")
+            with database() as db:
+                account = db.execute("SELECT salt,password_hash FROM users WHERE id=?", (user,)).fetchone()
+                if not hmac.compare_digest(password_hash(old_password, account["salt"]), account["password_hash"]):
+                    raise ApiError(403, "Das bisherige Passwort stimmt nicht.")
+                salt = secrets.token_bytes(16)
+                db.execute("UPDATE users SET salt=?,password_hash=? WHERE id=?",
+                           (salt, password_hash(new_password, salt), user))
+                match = re.search(r"pflanzen_session=([a-zA-Z0-9_-]+)", self.headers.get("Cookie", ""))
+                if match:
+                    db.execute("DELETE FROM sessions WHERE user_id=? AND token_hash<>?",
+                               (user, hashlib.sha256(match.group(1).encode()).hexdigest()))
+            return self.json(200, {"ok": True})
         if path == "/api/state" and method == "GET":
             with database() as db:
                 plants = [json.loads(row[0]) for row in db.execute("SELECT data FROM plants WHERE user_id=?", (user,))]

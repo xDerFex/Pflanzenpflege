@@ -25,6 +25,10 @@ const sandbox = {
 };
 vm.createContext(sandbox);
 vm.runInContext(care + '\n' + app, sandbox);
+assert.equal(vm.runInContext('interval({...newPlant(),substrate:"Wasser"})', sandbox), 3);
+const normalInterval = vm.runInContext('interval(newPlant())', sandbox);
+const tallInterval = vm.runInContext('interval({...newPlant(),heightCM:80})', sandbox);
+assert.equal(tallInterval, Math.max(2, normalInterval - 1));
 
 async function click(action) {
   const target = {
@@ -38,7 +42,16 @@ async function click(action) {
 
 (async () => {
   assert.match(await click('room-form'), /id="room-form"/);
-  assert.match(await click('plant-form'), /id="plant-form"/);
+  const plantForm = await click('plant-form');
+  assert.match(plantForm, /id="plant-form"/);
+  assert.match(plantForm, /data-wizard-step="4"/);
+  assert.doesNotMatch(plantForm, /name="milestoneDate"/);
+  assert.match(plantForm, /Abstand zum Fenster \(cm\)/);
+  const preservedForm = { marker: 'form with unsaved values' };
+  roots['sheet-root'].firstElementChild = preservedForm;
+  roots['sheet-root'].replaceChildren = node => { roots['sheet-root'].restored = node; };
+  vm.runInContext('openSheet("Info", "Information", "", true); closeSheet()', sandbox);
+  assert.equal(roots['sheet-root'].restored, preservedForm);
   assert.equal(roots['toast-root'].innerHTML, '');
   console.log('Room and plant forms open without crypto.randomUUID');
 })().catch(error => { console.error(error); process.exitCode = 1; });

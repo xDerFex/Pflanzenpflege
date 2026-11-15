@@ -1,6 +1,6 @@
 export const tasks = ['Düngen','Besprühen','Blätter reinigen','Rückschnitt prüfen','Fortschritt festhalten','Umtopfen'];
 export const taskKinds = {'Düngen':'Gedüngt','Besprühen':'Besprüht','Blätter reinigen':'Blätter gereinigt','Rückschnitt prüfen':'Rückschnitt geprüft','Fortschritt festhalten':'Fortschritt','Umtopfen':'Umgetopft'};
-export const substrates = ['Blumenerde','Lockerer Aroid-Mix','Mineralisch','Anderes Substrat'];
+export const substrates = ['Pflanzenerde','Aroid-Mix','Mineralisch','Kakteen- und Sukkulentenerde','Wasser','Anderes Substrat'];
 export const directions = ['Norden','Nordosten','Osten','Südosten','Süden','Südwesten','Westen','Nordwesten'];
 const localDay = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 export function uid(){
@@ -23,7 +23,9 @@ export function starterPlans(species){return ['Düngen','Fortschritt festhalten'
 export function interval(p,day=today()){
   const s=(p.species||'').toLowerCase();let n=s.includes('alocasia')||s.includes('farn')?4:s.includes('aloe')||s.includes('kakt')?10:5;
   if((+p.potDiameter||12)<=10)n--;if((+p.potDiameter||12)>=21)n++;
-  if(['Lockerer Aroid-Mix','Mineralisch'].includes(p.substrate))n--;
+  if(['Lockerer Aroid-Mix','Aroid-Mix','Mineralisch','Kakteen- und Sukkulentenerde'].includes(p.substrate))n--;
+  if(p.substrate==='Wasser')return 3; // Water level check, not a soil-drying estimate.
+  if(p.heightCM&&p.potDiameter&&p.heightCM/p.potDiameter>=4)n--;
   const winter=[11,12,1,2,3].includes(new Date(day+'T12:00:00').getMonth()+1),lamp=p.growLight&&(+p.lightHours||8)>=8;
   if(+p.windowDistance>=2&&!lamp)n++;if(winter&&!lamp)n++;if(winter&&p.nearHeater)n-=2;n=Math.max(2,n);
   let samples=[...((winter?p.winterCycles:p.summerCycles)||[])].sort((a,b)=>a-b);
@@ -31,7 +33,7 @@ export function interval(p,day=today()){
   return n;
 }
 function recordCycle(p,when){if(!p.lastWatered)return;const days=Math.round((new Date(dateOnly(when)+'T12:00:00')-new Date(dateOnly(p.lastWatered)+'T12:00:00'))/86400000);if(days<1||days>35)return;if((p.events||[]).some(e=>e.kind==='Schon trocken'&&e.date>=p.lastWatered))return;const key=[11,12,1,2,3].includes(new Date(when).getMonth()+1)?'winterCycles':'summerCycles';p[key]=[...(p[key]||[]),days].slice(-3)}
-export function water(p,observedDry=true){const now=new Date().toISOString();if(observedDry){const isDue=due(p.nextCheck);const checkedWet=(p.events||[]).some(e=>e.kind==='Noch feucht'&&p.lastWatered&&e.date>=p.lastWatered);if(!isDue||dateOnly(p.nextCheck)===today()||checkedWet)recordCycle(p,now);if(!isDue)(p.events||=[]).push(event('Schon trocken'))}p.lastWatered=now;p.sensorSnoozeUntil=null;(p.events||=[]).push(event('Gegossen'));p.nextCheck=addDays(today(),interval(p));return p}
-export function postponeCheck(p,days,wet){if(wet)(p.events||=[]).push(event('Noch feucht'));p.nextCheck=addDays(today(),days);p.sensorSnoozeUntil=p.nextCheck;return p}
+export function water(p,observedDry=true){const now=new Date().toISOString();if(p.substrate==='Wasser'){p.lastWatered=now;(p.events||=[]).push(event('Wasserstand geprüft'));p.nextCheck=addDays(today(),interval(p));return p}if(observedDry){const isDue=due(p.nextCheck);const checkedWet=(p.events||[]).some(e=>e.kind==='Noch feucht'&&p.lastWatered&&e.date>=p.lastWatered);if(!isDue||dateOnly(p.nextCheck)===today()||checkedWet)recordCycle(p,now);if(!isDue)(p.events||=[]).push(event('Schon trocken'))}p.lastWatered=now;p.sensorSnoozeUntil=null;(p.events||=[]).push(event('Gegossen'));p.nextCheck=addDays(today(),interval(p));return p}
+export function postponeCheck(p,days,wet){if(wet)(p.events||=[]).push(event(p.substrate==='Wasser'?'Wasserstand okay':'Noch feucht'));p.nextCheck=addDays(today(),days);p.sensorSnoozeUntil=p.nextCheck;return p}
 export function finishTask(p,task){(p.events||=[]).push(event(taskKinds[task]));const plan=(p.taskPlans||[]).find(x=>x.task===task);if(plan){let days=plan.days;if(task==='Düngen'&&[11,12,1,2].includes(new Date().getMonth()+1)&&!(p.growLight&&(+p.lightHours||0)>=8))days=Math.max(30,days*2);plan.next=addDays(today(),days)}return p}
-export function newPlant(){return {id:uid(),species:'',nickname:'',roomID:'',windowID:'',windowDirection:'',windowDistance:null,growLight:false,lightHours:null,ppfd:null,dli:null,potDiameter:12,substrate:'Blumenerde',nearHeater:false,lastWatered:null,nextCheck:addDays(today(),5),photoName:null,events:[],winterCycles:[],summerCycles:[],taskPlans:[],sensor:null,milestoneDate:null,scientificName:null,careNotes:null,referenceImageURL:null,useReferenceImage:false,extraNotification:false}}
+export function newPlant(){return {id:uid(),species:'',nickname:'',roomID:'',windowID:'',windowDirection:'',windowDistance:null,growLight:false,lightHours:null,ppfd:null,dli:null,potDiameter:12,heightCM:null,substrate:'Pflanzenerde',nearHeater:false,lastWatered:null,nextCheck:addDays(today(),5),photoName:null,events:[],winterCycles:[],summerCycles:[],taskPlans:[],sensor:null,milestoneDate:null,scientificName:null,careNotes:null,referenceImageURL:null,useReferenceImage:false,extraNotification:false}}
